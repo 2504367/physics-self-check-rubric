@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>물리 실험 자기평가 루브릭</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f6f8; --card:#fff; --ink:#1c2230; --muted:#667085; --line:#e3e6eb;
+  --pri:#2453c4; --pri-soft:#e9eefb; --pri-ink:#173a8f;
+  --good:#16794f; --good-soft:#e5f4ec; --warn:#a95a07; --warn-soft:#fbf0e2; --bad:#b4332a; --bad-soft:#fbe9e7;
+  --r:12px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;font-size:15px;line-height:1.55}
+button,input,select,textarea{font:inherit;color:inherit}
+header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.hwrap{max-width:1040px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:17px;margin-right:auto}
+.brand small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:4px;background:var(--bg);padding:4px;border-radius:10px}
+.tabs button{border:0;background:transparent;padding:7px 14px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:500}
+.tabs button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+main{max-width:1040px;margin:0 auto;padding:20px 20px 60px}
+#banner{max-width:1040px;margin:0 auto;padding:0 20px}
+.note{margin-top:14px;padding:10px 14px;border-radius:10px;background:var(--warn-soft);color:var(--warn);font-size:13.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:16px}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:18px;margin:0 0 12px}
+h3{font-size:15.5px;margin:0 0 8px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px;min-width:160px;flex:1}
+.field label{font-size:13px;color:var(--muted);font-weight:500}
+input[type=text],input[type=number],select,textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--pri-soft);border-color:var(--pri)}
+textarea{min-height:80px;resize:vertical}
+.btn{border:1px solid var(--line);background:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{background:#f8f9fb}
+.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+.btn.pri:hover{background:var(--pri-ink)}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:4px 10px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.exp-card{border:1px solid var(--line);border-radius:var(--r);padding:16px;background:#fff;display:flex;flex-direction:column;gap:8px}
+.exp-card .meta{font-size:13px;color:var(--muted)}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:500;background:var(--bg);color:var(--muted)}
+.pill.good{background:var(--good-soft);color:var(--good)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.pri{background:var(--pri-soft);color:var(--pri-ink)}
+.stepper{display:flex;gap:6px;margin:6px 0 18px;flex-wrap:wrap}
+.stepper div{flex:1;min-width:110px;padding:8px 10px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:13px;color:var(--muted)}
+.stepper div b{display:block;font-size:12px;font-weight:500}
+.stepper div.on{border-color:var(--pri);color:var(--pri-ink);background:var(--pri-soft)}
+.stepper div.done{color:var(--good)}
+.item{border-top:1px solid var(--line);padding:16px 0}
+.item:first-child{border-top:0;padding-top:4px}
+.item-h{margin-bottom:10px;font-weight:500}
+.item-h .tag{display:inline-block;font-size:12px;font-weight:700;color:var(--pri-ink);background:var(--pri-soft);padding:1px 8px;border-radius:6px;margin-right:6px}
+.item-h .prev{font-size:12px;color:var(--muted);font-weight:400;margin-left:6px}
+.levels{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media (max-width:640px){.levels{grid-template-columns:1fr 1fr}}
+.lv{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 10px;text-align:left;cursor:pointer;font-size:13px;line-height:1.45;color:var(--ink)}
+.lv b{display:block;font-size:12px;color:var(--muted);margin-bottom:2px}
+.lv:hover{border-color:#b9c6e6}
+.lv.sel{border-color:var(--pri);background:var(--pri-soft)}
+.lv.sel b{color:var(--pri-ink)}
+.navbar{display:flex;justify-content:space-between;gap:10px;margin-top:6px;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:12.5px;color:var(--muted);font-weight:500;background:#fafbfc}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td input{padding:6px 8px}
+.tablewrap{overflow-x:auto}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.kpi .l{font-size:12.5px;color:var(--muted)}
+.kpi .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25;margin-top:2px}
+.kpi .s{font-size:12.5px;color:var(--muted)}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;max-width:90vw}
+#toast.show{opacity:1}
+#modal{position:fixed;inset:0;background:rgba(20,24,35,.4);display:none;align-items:center;justify-content:center;z-index:30;padding:20px}
+#modal.show{display:flex}
+#modal .box{background:#fff;border-radius:14px;padding:22px;max-width:420px;width:100%}
+.empty{text-align:center;padding:40px 20px;color:var(--muted)}
+.loading{text-align:center;padding:60px;color:var(--muted)}
+.hint{font-size:12.5px;color:var(--muted);margin-top:4px}
+</style>
+</head>
+<body>
+<header>
+  <div class="hwrap">
+    <div class="brand">물리 실험 자기평가 루브릭<small>실험 전후 이해도 체크</small></div>
+  </div>
+</header>
+<div id="banner"></div>
+<main id="app"><div class="loading">불러오는 중…</div></main>
+<div id="toast"></div>
+<div id="modal"><div class="box" id="modalbox"></div></div>
+
+<script>
+/* ===================== 기본 데이터 ===================== */
+const CORE = [
+  {id:'concept', name:'개념 이해', q:'이 실험에 쓰이는 물리 법칙과 공식을 설명할 수 있다.',
+   levels:['법칙이나 공식이 무엇인지 잘 모른다','공식은 알지만 의미를 설명하기 어렵다','공식의 의미와 각 변수를 설명할 수 있다','공식을 유도하고 적용 조건(가정)까지 설명할 수 있다']},
+  {id:'design', name:'실험 설계', q:'실험 목적과 변인(독립·종속·통제 변인)을 구분할 수 있다.',
+   levels:['실험 목적이 무엇인지 모호하다','목적은 알지만 변인을 구분하기 어렵다','목적과 주요 변인을 구분할 수 있다','변인 통제 방법까지 스스로 계획할 수 있다']},
+  {id:'measure', name:'측정·장비', q:'장비를 올바르게 다루고 측정값을 정확하게 읽을 수 있다.',
+   levels:['장비 사용법을 잘 모른다','안내를 받으면 측정할 수 있다','혼자 측정하고 단위·유효숫자를 지킬 수 있다','측정 과정의 오차를 줄이는 방법까지 적용할 수 있다']},
+  {id:'data', name:'데이터 처리', q:'측정값을 표·그래프로 정리하고 필요한 값을 계산할 수 있다.',
+   levels:['데이터를 어떻게 정리할지 모르겠다','표로 정리는 하지만 계산이 어렵다','표·그래프 정리와 평균 등 계산을 할 수 있다','그래프 기울기·추세선 등으로 물리량을 추출할 수 있다']},
+  {id:'error', name:'오차 분석', q:'오차의 원인을 찾고 오차율과 불확도(표준편차 등)를 계산할 수 있다.',
+   levels:['오차가 왜 생기는지 모르겠다','오차율 계산만 할 수 있다','오차율과 표준편차를 구하고 원인을 제시할 수 있다','계통·우연 오차를 구분하고 개선 방법을 제안할 수 있다']},
+  {id:'conclusion', name:'결론·해석', q:'결과를 이론값과 비교해 의미를 설명하고 개선점을 제시할 수 있다.',
+   levels:['결과가 무엇을 뜻하는지 설명하기 어렵다','이론값과 비교만 할 수 있다','차이의 원인을 근거와 함께 설명할 수 있다','결과의 한계와 후속 실험까지 제안할 수 있다']},
+];
+const GENERIC_LEVELS = ['전혀 할 수 없다','도움을 받으면 할 수 있다','대부분 혼자 할 수 있다','자신 있게 설명·수행할 수 있다'];
+const LV_NAMES = ['1 미흡','2 기초','3 능숙','4 우수'];
+const LOCAL_SEED = [{id:'freefall', order:1, name:'자유낙하 실험', desc:'공을 일정 높이에서 떨어뜨려 낙하 시간을 측정하고 중력가속도 g를 구한다.',
+  extras:[{id:'x1',q:'h = ½gt² 관계를 이용해 측정값으로 g를 구하는 과정을 설명할 수 있다.'},{id:'x2',q:'공기 저항과 반응 시간(타이밍 오차)이 결과에 주는 영향을 설명할 수 있다.'}]}];
+
+/* ===================== 유틸 ===================== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clone = o => JSON.parse(JSON.stringify(o ?? null));
+const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+const fmt = (n, d=2) => (n==null || !Number.isFinite(n)) ? '–' : n.toFixed(d);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2600); }
+function askConfirm(msg, okText='삭제'){
+  return new Promise(res=>{
+    $('#modalbox').innerHTML = `<h3>확인</h3><p>${esc(msg)}</p><div class="navbar"><span></span><div class="row"><button class="btn" id="mNo">취소</button><button class="btn pri" id="mYes">${esc(okText)}</button></div></div>`;
+    $('#modal').classList.add('show');
+    const done = v => { $('#modal').classList.remove('show'); res(v); };
+    $('#mNo').onclick = () => done(false); $('#mYes').onclick = () => done(true);
+  });
+}
+function errMsg(e){ return '저장하지 못했어요. 브라우저 저장 공간을 확인해 주세요.'; }
+
+/* ===================== 상태 ===================== */
+const S = { mode:'loading', uid:null, exps:[], my:null,
+  expId:null, saving:false };
+
+/* ===================== 저장소 (브라우저 localStorage) ===================== */
+const Local = {
+  key:'physics-rubric-day1', mem:null,
+  load(){ if(this.mem) return this.mem; let o=null; try{ o=JSON.parse(localStorage.getItem(this.key)); }catch(e){} this.mem=o||{}; return this.mem; },
+  save(){ try{ localStorage.setItem(this.key, JSON.stringify(this.mem)); }catch(e){} }
+};
+const API = {
+  async init(){ S.mode='local'; S.uid='local-me'; },
+  async loadAll(){
+    const L = Local.load();
+    S.exps = clone(LOCAL_SEED);
+    S.my = clone((L.resps||{})[S.uid] || null);
+    S.exps.forEach(normExp);
+  },
+  async saveResp(id, doc){ const L=Local.load(); L.resps=L.resps||{}; L.resps[id]=clone(doc); Local.save(); }
+};
+function normExp(e){
+  e.extras = Array.isArray(e.extras) ? e.extras.filter(x=>x && x.id) : [];
+  return e;
+}
+
+/* ===================== 계산 ===================== */
+function dims(exp){
+  const d = CORE.map(c=>({id:c.id, name:c.name}));
+  if(exp.extras.length) d.push({id:'_extra', name:'실험 특화'});
+  return d;
+}
+function dimScores(exp, part){
+  if(!part) return {};
+  const out = {};
+  CORE.forEach(c=>{ const v=num(part.scores && part.scores[c.id]); if(v) out[c.id]=v; });
+  if(exp.extras.length){
+    const xs = exp.extras.map(x=>num(part.extras && part.extras[x.id])).filter(v=>v);
+    if(xs.length) out._extra = xs.reduce((a,b)=>a+b,0)/xs.length;
+  }
+  return out;
+}
+// 1~4단계 평균을 100점으로 환산 (가중치 없음)
+function total(exp, ds){
+  const v = dims(exp).map(d=>ds[d.id]).filter(x=>x!=null);
+  if(!v.length) return null;
+  return (v.reduce((a,b)=>a+b,0)/v.length - 1) / 3 * 100;
+}
+
+/* ===================== 학생 기록 ===================== */
+function ensureMy(){ if(!S.my) S.my={name:'', sid:'', exps:{}}; if(!S.my.exps) S.my.exps={}; return S.my; }
+function rec(expId){
+  const my=ensureMy();
+  if(!my.exps[expId]) my.exps[expId] = {step:1, done:false, pre:{scores:{},extras:{}}, post:{scores:{},extras:{},reflection:''}};
+  const r=my.exps[expId];
+  r.pre=r.pre||{scores:{},extras:{}}; r.pre.scores=r.pre.scores||{}; r.pre.extras=r.pre.extras||{};
+  r.post=r.post||{scores:{},extras:{}}; r.post.scores=r.post.scores||{}; r.post.extras=r.post.extras||{};
+  return r;
+}
+async function saveMy(){
+  const my=ensureMy(); my.updatedAt=new Date().toISOString();
+  S.saving=true;
+  try { await API.saveResp(S.uid, my); return true; }
+  catch(e){ toast(errMsg(e)); return false; }
+  finally { S.saving=false; }
+}
+
+/* ===================== 렌더: 공통 ===================== */
+function renderBanner(){
+  $('#banner').innerHTML = S.mode==='local'
+    ? `<div class="note">데이터는 이 브라우저에 저장돼요. </div>` : '';
+}
+function render(){
+  renderBanner();
+  const app=$('#app');
+  if(S.expId){ app.innerHTML = flowHTML(); updateProgress(); }
+  else app.innerHTML = homeHTML();
+}
+
+/* ===================== 렌더: 학생 홈 ===================== */
+function statusOf(exp){
+  const r = S.my && S.my.exps && S.my.exps[exp.id];
+  if(!r) return ['시작 전',''];
+  if(r.done) return ['완료','good'];
+  return [['','사전 평가 중','사후 평가 중','결과 확인'][r.step]||'진행 중','pri'];
+}
+function homeHTML(){
+  const my = S.my || {};
+  const cards = S.exps.length ? S.exps.map(e=>{
+    const [st,cls]=statusOf(e); const r=S.my&&S.my.exps&&S.my.exps[e.id];
+    const label = !r ? '시작하기' : r.done ? '결과 보기' : '이어서 하기';
+    return `<div class="exp-card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${esc(e.name)}</h3><span class="pill ${cls}">${esc(st)}</span></div>
+      <div class="small">${esc(e.desc||'')}</div>
+      <div class="meta">문항 ${CORE.length+e.extras.length}개</div>
+      <div><button class="btn pri sm" data-act="open" data-id="${esc(e.id)}">${label}</button></div></div>`;
+  }).join('') : `<div class="empty">아직 등록된 실험이 없어요.</div>`;
+  return `<div class="card"><h1>실험 자기평가</h1><p class="muted" style="margin:0 0 14px">실험 전에 내 이해도를 체크하고, 실험 후에 다시 체크해서 얼마나 달라졌는지 확인해요.</p>
+    <div class="row"><div class="field"><label>이름</label><input type="text" id="pName" value="${esc(my.name||'')}" placeholder="홍길동"></div>
+    <div class="field"><label>학번</label><input type="text" id="pSid" value="${esc(my.sid||'')}" placeholder="20261234"></div></div>
+    <div class="hint">이름과 학번은 교수자의 결과 분석에 표시돼요.</div></div>
+    <h2>실험 목록</h2><div class="grid g2">${cards}</div>`;
+}
+
+/* ===================== 렌더: 학생 진행 흐름 ===================== */
+const STEPS = ['사전 자기평가','사후 자기평가','결과 요약'];
+function curExp(){ return S.exps.find(e=>e.id===S.expId); }
+function flowHTML(){
+  const exp=curExp(); if(!exp){ S.expId=null; return homeHTML(); }
+  const r=rec(exp.id), step=r.step||1;
+  const stepper = `<div class="stepper">${STEPS.map((s,i)=>`<div class="${i+1===step?'on':(i+1<step||r.done)?'done':''}"><b>${i+1}단계</b>${s}</div>`).join('')}</div>`;
+  let body='';
+  if(step===1) body = rubricHTML(exp,'pre');
+  if(step===2) body = rubricHTML(exp,'post') + `<div class="card"><h3>성찰 메모 (선택)</h3><textarea data-f="reflection" placeholder="실험하면서 새로 알게 된 점, 어려웠던 점">${esc(r.post.reflection||'')}</textarea></div>`;
+  if(step===3) body = summaryHTML(exp, r);
+  const nextLabel = step===2 ? '제출하고 결과 보기' : step===3 ? '' : '다음';
+  return `<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px"><div><button class="btn sm" data-act="home">← 실험 목록</button></div><span class="muted small">${esc(S.my&&S.my.name||'')} ${esc(S.my&&S.my.sid||'')}</span></div>
+    <h1>${esc(exp.name)}</h1><p class="muted" style="margin:0 0 8px">${esc(exp.desc||'')}</p>${stepper}${body}
+    <div class="navbar"><div>${step>1?`<button class="btn" data-act="step" data-d="-1">이전</button>`:''}</div>
+    <div class="row" style="align-items:center"><span class="small muted" id="progress"></span>${nextLabel?`<button class="btn pri" data-act="step" data-d="1">${nextLabel}</button>`:''}</div></div>`;
+}
+function rubricItems(exp){
+  return CORE.map(c=>({key:'scores', id:c.id, name:c.name, q:c.q, levels:c.levels}))
+    .concat(exp.extras.map((x,i)=>({key:'extras', id:x.id, name:'실험 특화 '+(i+1), q:x.q, levels:GENERIC_LEVELS})));
+}
+function rubricHTML(exp, part){
+  const r=rec(exp.id), cur=r[part];
+  const items = rubricItems(exp).map(it=>{
+    const v=num(cur[it.key][it.id]);
+    const pv = part==='post' ? num(r.pre[it.key][it.id]) : null;
+    return `<div class="item"><div class="item-h"><span class="tag">${esc(it.name)}</span>${esc(it.q)}${pv?`<span class="prev">(사전: ${pv}단계)</span>`:''}</div>
+      <div class="levels">${it.levels.map((l,i)=>`<button class="lv ${v===i+1?'sel':''}" data-act="lv" data-part="${part}" data-key="${it.key}" data-id="${esc(it.id)}" data-v="${i+1}"><b>${LV_NAMES[i]}</b>${esc(l)}</button>`).join('')}</div></div>`;
+  }).join('');
+  const title = part==='pre' ? '실험 전 자기평가' : '실험 후 자기평가';
+  const sub = part==='pre' ? '지금 내 상태에 가장 가까운 단계를 고르세요. 정답은 없어요.' : '실험을 마친 지금 기준으로 다시 골라 보세요. 괄호 안은 실험 전에 고른 단계예요.';
+  return `<div class="card"><h2 style="margin-bottom:2px">${title}</h2><p class="small muted" style="margin:0 0 6px">${sub}</p>${items}</div>`;
+}
+function summaryHTML(exp, r){
+  const pre=dimScores(exp, r.pre), post=dimScores(exp, r.post);
+  const tp=total(exp,pre), tq=total(exp,post);
+  const rows = dims(exp).map(d=>{ const a=pre[d.id], b=post[d.id]; const g=(a!=null&&b!=null)?b-a:null;
+    return `<tr><td>${esc(d.name)}</td><td class="num">${fmt(a,1)}</td><td class="num">${fmt(b,1)}</td><td class="num">${g==null?'–':(g>=0?'+':'')+fmt(g,1)}</td></tr>`; }).join('');
+  return `<div class="kpis">
+    <div class="kpi"><div class="l">사전 자기평가</div><div class="v">${fmt(tp,0)}</div><div class="s">100점 환산</div></div>
+    <div class="kpi"><div class="l">사후 자기평가</div><div class="v">${fmt(tq,0)}</div><div class="s">${(tp!=null&&tq!=null)?((tq-tp>=0?'+':'')+fmt(tq-tp,0)+'점 변화'):''}</div></div></div>
+    <div class="card"><h3>항목별 변화</h3><div class="tablewrap"><table><thead><tr><th>항목</th><th class="num">실험 전</th><th class="num">실험 후</th><th class="num">변화</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    <div class="row"><button class="btn" data-act="redo">자기평가 다시 하기</button></div>`;
+}
+function countAnswered(exp, part){
+  const r=rec(exp.id)[part]; const its=rubricItems(exp);
+  return [its.filter(it=>num(r[it.key][it.id])).length, its.length];
+}
+function updateProgress(){
+  const exp=curExp(); const el=$('#progress'); if(!exp||!el) return; const r=rec(exp.id);
+  if(r.step===1||r.step===2){ const [a,b]=countAnswered(exp, r.step===1?'pre':'post'); el.textContent=`${a}/${b} 문항 응답`; }
+  else el.textContent='';
+}
+
+/* ===================== 이벤트 ===================== */
+document.addEventListener('click', async ev=>{
+  const b = ev.target.closest('[data-act]'); if(!b || b.tagName==='SELECT') return;
+  const act=b.dataset.act;
+  try { await handle(act, b); } catch(e){ console.error(e); toast(errMsg(e)); }
+});
+async function handle(act, b){
+  if(act==='home'){ S.expId=null; render(); window.scrollTo(0,0); return; }
+  if(act==='open'){
+    const my=ensureMy();
+    my.name=($('#pName')?.value||'').trim(); my.sid=($('#pSid')?.value||'').trim();
+    if(!my.name || !my.sid){ toast('이름과 학번을 먼저 입력해 주세요.'); return; }
+    S.expId=b.dataset.id; rec(S.expId);
+    await saveMy();
+    render(); window.scrollTo(0,0); return;
+  }
+  if(act==='lv'){
+    const exp=curExp(), r=rec(exp.id), part=r[b.dataset.part];
+    part[b.dataset.key][b.dataset.id]=+b.dataset.v;
+    b.parentElement.querySelectorAll('.lv').forEach(x=>x.classList.toggle('sel', x===b));
+    updateProgress(); return;
+  }
+  if(act==='step'){
+    if(S.saving) return;
+    const exp=curExp(), r=rec(exp.id), d=+b.dataset.d;
+    if(d>0){
+      const [a,n]=countAnswered(exp, r.step===1?'pre':'post'); if(a<n){ toast(`아직 ${n-a}개 문항에 답하지 않았어요.`); return; }
+      if(r.step===2) r.done=true;
+    }
+    const prev=r.step; r.step=Math.max(1, Math.min(3, (r.step||1)+d));
+    const ok = await saveMy();
+    if(!ok && d>0){ r.step=prev; if(prev===2) r.done=false; return; }
+    render(); window.scrollTo(0,0); return;
+  }
+  if(act==='redo'){
+    const ok = await askConfirm('사전·사후 자기평가를 처음부터 다시 할까요? 지금 결과는 지워져요.', '다시 하기');
+    if(!ok) return; delete S.my.exps[S.expId]; rec(S.expId); await saveMy(); render(); window.scrollTo(0,0); return;
+  }
+}
+document.addEventListener('input', ev=>{
+  const t=ev.target;
+  if(t.dataset.f){ const exp=curExp(); if(!exp) return; rec(exp.id).post.reflection=t.value; return; }
+});
+document.addEventListener('change', ev=>{
+  const t=ev.target;
+  if((t.id==='pName'||t.id==='pSid')){ const my=ensureMy(); my.name=$('#pName').value.trim(); my.sid=$('#pSid').value.trim(); }
+});
+
+/* ===================== 시작 ===================== */
+(async function start(){
+  await API.init();
+  await API.loadAll();
+  render();
+})();
+</script>
+</body>
+</html>
