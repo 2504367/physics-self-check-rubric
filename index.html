@@ -6,6 +6,7 @@
 <title>물리 실험 자기평가 루브릭</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{
   --bg:#f5f6f8; --card:#fff; --ink:#1c2230; --muted:#667085; --line:#e3e6eb;
@@ -84,6 +85,13 @@ td input{padding:6px 8px}
 .kpi .l{font-size:12.5px;color:var(--muted)}
 .kpi .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25;margin-top:2px}
 .kpi .s{font-size:12.5px;color:var(--muted)}
+.chartbox{position:relative;height:320px}
+.fb{padding:10px 14px;border-radius:10px;background:var(--bg);margin-bottom:8px;font-size:14px}
+.fb.good{background:var(--good-soft)} .fb.warn{background:var(--warn-soft)} .fb.bad{background:var(--bad-soft)}
+.subtabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.subtabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;cursor:pointer;font-size:14px}
+.subtabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.xrow{display:flex;gap:8px;margin-bottom:8px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;max-width:90vw}
 #toast.show{opacity:1}
 #modal{position:fixed;inset:0;background:rgba(20,24,35,.4);display:none;align-items:center;justify-content:center;z-index:30;padding:20px}
@@ -91,13 +99,14 @@ td input{padding:6px 8px}
 #modal .box{background:#fff;border-radius:14px;padding:22px;max-width:420px;width:100%}
 .empty{text-align:center;padding:40px 20px;color:var(--muted)}
 .loading{text-align:center;padding:60px;color:var(--muted)}
+.wlist{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .hint{font-size:12.5px;color:var(--muted);margin-top:4px}
 </style>
 </head>
 <body>
 <header>
   <div class="hwrap">
-    <div class="brand">물리 실험 자기평가 루브릭<small>실험 전후 이해도 체크</small></div>
+    <div class="brand">물리 실험 자기평가 루브릭<small>실험 전후 이해도 체크 · 오차 분석 · 메타인지</small></div>
   </div>
 </header>
 <div id="banner"></div>
@@ -123,8 +132,11 @@ const CORE = [
 ];
 const GENERIC_LEVELS = ['전혀 할 수 없다','도움을 받으면 할 수 있다','대부분 혼자 할 수 있다','자신 있게 설명·수행할 수 있다'];
 const LV_NAMES = ['1 미흡','2 기초','3 능숙','4 우수'];
+const DEFAULT_CFG = {weights:{concept:1.5,design:1,measure:1,data:1,error:1.5,conclusion:1,_extra:1}, rubricRatio:70};
 const LOCAL_SEED = [{id:'freefall', order:1, name:'자유낙하 실험', desc:'공을 일정 높이에서 떨어뜨려 낙하 시간을 측정하고 중력가속도 g를 구한다.',
+  quantity:'중력가속도 g', unit:'m/s²', theory:9.8, tol:5, inputMode:'ht',
   extras:[{id:'x1',q:'h = ½gt² 관계를 이용해 측정값으로 g를 구하는 과정을 설명할 수 있다.'},{id:'x2',q:'공기 저항과 반응 시간(타이밍 오차)이 결과에 주는 영향을 설명할 수 있다.'}]}];
+const TCRIT = [12.706,4.303,3.182,2.776,2.571,2.447,2.365,2.306,2.262,2.228,2.201,2.179,2.160,2.145,2.131,2.120,2.110,2.101,2.093,2.086,2.080,2.074,2.069,2.064,2.060,2.056,2.052,2.048,2.045,2.042];
 
 /* ===================== 유틸 ===================== */
 const $ = s => document.querySelector(s);
@@ -142,15 +154,18 @@ function askConfirm(msg, okText='삭제'){
     $('#mNo').onclick = () => done(false); $('#mYes').onclick = () => done(true);
   });
 }
+function mergeCfg(c){ const d=clone(DEFAULT_CFG); if(c){ Object.assign(d.weights, c.weights||{}); if(Number.isFinite(c.rubricRatio)) d.rubricRatio=c.rubricRatio; } return d; }
 function errMsg(e){ return '저장하지 못했어요. 브라우저 저장 공간을 확인해 주세요.'; }
 
 /* ===================== 상태 ===================== */
-const S = { mode:'loading', uid:null, exps:[], my:null,
+const S = { mode:'loading', uid:null, cfg:mergeCfg(null), exps:[], my:null,
   expId:null, saving:false };
+const charts = {};
+function killChart(k){ if(charts[k]){ charts[k].destroy(); delete charts[k]; } }
 
 /* ===================== 저장소 (브라우저 localStorage) ===================== */
 const Local = {
-  key:'physics-rubric-day1', mem:null,
+  key:'physics-rubric-day2', mem:null,
   load(){ if(this.mem) return this.mem; let o=null; try{ o=JSON.parse(localStorage.getItem(this.key)); }catch(e){} this.mem=o||{}; return this.mem; },
   save(){ try{ localStorage.setItem(this.key, JSON.stringify(this.mem)); }catch(e){} }
 };
@@ -158,7 +173,7 @@ const API = {
   async init(){ S.mode='local'; S.uid='local-me'; },
   async loadAll(){
     const L = Local.load();
-    S.exps = clone(LOCAL_SEED);
+    S.cfg = mergeCfg(L.cfg); S.exps = clone(LOCAL_SEED);
     S.my = clone((L.resps||{})[S.uid] || null);
     S.exps.forEach(normExp);
   },
@@ -166,10 +181,37 @@ const API = {
 };
 function normExp(e){
   e.extras = Array.isArray(e.extras) ? e.extras.filter(x=>x && x.id) : [];
+  e.theory = num(e.theory); e.tol = num(e.tol) || 5;
+  e.inputMode = e.inputMode==='ht' ? 'ht' : 'value';
   return e;
 }
 
 /* ===================== 계산 ===================== */
+function rowsToValues(exp, m){
+  if(!m) return [];
+  if(exp.inputMode==='ht'){
+    const H=m.h||[], T=m.t||[], out=[];
+    for(let i=0;i<Math.max(H.length,T.length);i++){ const h=num(H[i]), t=num(T[i]); if(h>0 && t>0) out.push(2*h/(t*t)); }
+    return out;
+  }
+  return (m.values||[]).map(num).filter(v=>v!=null);
+}
+function stats(vals, theory){
+  const n=vals.length; if(!n) return {n:0};
+  const mean=vals.reduce((a,b)=>a+b,0)/n;
+  const sd = n>1 ? Math.sqrt(vals.reduce((a,b)=>a+(b-mean)**2,0)/(n-1)) : null;
+  const se = sd!=null ? sd/Math.sqrt(n) : null;
+  const tc = n>1 ? (TCRIT[n-2] || 1.96) : null;
+  const ci = se!=null ? [mean-tc*se, mean+tc*se] : null;
+  const relErr = theory ? Math.abs(mean-theory)/Math.abs(theory)*100 : null;
+  const inCI = ci && theory!=null ? (theory>=ci[0] && theory<=ci[1]) : null;
+  const cv = sd!=null && mean ? sd/Math.abs(mean)*100 : null;
+  return {n, mean, sd, se, ci, relErr, inCI, cv};
+}
+function accScore(relErr, tol){
+  if(relErr==null) return null;
+  if(relErr <= tol*0.4) return 4; if(relErr <= tol) return 3; if(relErr <= tol*2) return 2; return 1;
+}
 function dims(exp){
   const d = CORE.map(c=>({id:c.id, name:c.name}));
   if(exp.extras.length) d.push({id:'_extra', name:'실험 특화'});
@@ -185,21 +227,40 @@ function dimScores(exp, part){
   }
   return out;
 }
-// 1~4단계 평균을 100점으로 환산 (가중치 없음)
-function total(exp, ds){
-  const v = dims(exp).map(d=>ds[d.id]).filter(x=>x!=null);
-  if(!v.length) return null;
-  return (v.reduce((a,b)=>a+b,0)/v.length - 1) / 3 * 100;
+function weighted(exp, ds, cfg){
+  let sw=0, s=0;
+  dims(exp).forEach(d=>{ const w=num(cfg.weights[d.id]) ?? 1; if(ds[d.id]!=null && w>0){ sw+=w; s+=w*(ds[d.id]-1)/3; } });
+  return sw ? s/sw*100 : null;
 }
+function analyze(exp, rec, cfg){
+  const pre = dimScores(exp, rec && rec.pre), post = dimScores(exp, rec && rec.post);
+  const preTotal = weighted(exp, pre, cfg), postTotal = weighted(exp, post, cfg);
+  const st = stats(rowsToValues(exp, rec && rec.measure), exp.theory);
+  const actual = accScore(st.relErr, exp.tol);
+  const skillIds = ['measure','data','error'];
+  const sv = skillIds.map(k=>post[k]).filter(v=>v!=null);
+  const selfSkill = sv.length ? sv.reduce((a,b)=>a+b,0)/sv.length : null;
+  const gap = (selfSkill!=null && actual!=null) ? selfSkill-actual : null;
+  const calib = gap==null ? null : gap>=1 ? 'over' : gap<=-1 ? 'under' : 'ok';
+  const pred = num(rec && rec.pre && rec.pre.predErr);
+  const predGap = (pred!=null && st.relErr!=null) ? st.relErr - pred : null;
+  const accPct = actual!=null ? (actual-1)/3*100 : null;
+  const r = (num(cfg.rubricRatio) ?? 70)/100;
+  const composite = (postTotal!=null && accPct!=null) ? r*postTotal + (1-r)*accPct : null;
+  return {pre, post, preTotal, postTotal, growth:(preTotal!=null&&postTotal!=null)?postTotal-preTotal:null, st, actual, selfSkill, gap, calib, pred, predGap, composite};
+}
+const CALIB = {over:['과대평가 경향','bad'], under:['과소평가 경향','warn'], ok:['보정 양호','good']};
 
 /* ===================== 학생 기록 ===================== */
 function ensureMy(){ if(!S.my) S.my={name:'', sid:'', exps:{}}; if(!S.my.exps) S.my.exps={}; return S.my; }
 function rec(expId){
   const my=ensureMy();
-  if(!my.exps[expId]) my.exps[expId] = {step:1, done:false, pre:{scores:{},extras:{}}, post:{scores:{},extras:{},reflection:''}};
+  if(!my.exps[expId]) my.exps[expId] = {step:1, done:false, pre:{scores:{},extras:{},predErr:''}, measure:{values:['','',''],h:['','',''],t:['','','']}, post:{scores:{},extras:{},reflection:''}};
   const r=my.exps[expId];
   r.pre=r.pre||{scores:{},extras:{}}; r.pre.scores=r.pre.scores||{}; r.pre.extras=r.pre.extras||{};
   r.post=r.post||{scores:{},extras:{}}; r.post.scores=r.post.scores||{}; r.post.extras=r.post.extras||{};
+  r.measure=r.measure||{values:[''],h:[''],t:['']};
+  ['values','h','t'].forEach(k=>{ if(!Array.isArray(r.measure[k])||!r.measure[k].length) r.measure[k]=['']; });
   return r;
 }
 async function saveMy(){
@@ -213,12 +274,13 @@ async function saveMy(){
 /* ===================== 렌더: 공통 ===================== */
 function renderBanner(){
   $('#banner').innerHTML = S.mode==='local'
-    ? `<div class="note">데이터는 이 브라우저에 저장돼요. </div>` : '';
+    ? `<div class="note">데이터는 이 브라우저에 저장돼요. (교수자 대시보드와 서버 저장은 다음 단계에서 추가 예정)</div>` : '';
 }
 function render(){
   renderBanner();
+  Object.keys(charts).forEach(killChart);
   const app=$('#app');
-  if(S.expId){ app.innerHTML = flowHTML(); updateProgress(); }
+  if(S.expId){ app.innerHTML = flowHTML(); afterFlow(); }
   else app.innerHTML = homeHTML();
 }
 
@@ -227,7 +289,7 @@ function statusOf(exp){
   const r = S.my && S.my.exps && S.my.exps[exp.id];
   if(!r) return ['시작 전',''];
   if(r.done) return ['완료','good'];
-  return [['','사전 평가 중','사후 평가 중','결과 확인'][r.step]||'진행 중','pri'];
+  return [['','사전 평가 중','측정 결과 입력 중','사후 평가 중','결과 확인'][r.step]||'진행 중','pri'];
 }
 function homeHTML(){
   const my = S.my || {};
@@ -236,10 +298,10 @@ function homeHTML(){
     const label = !r ? '시작하기' : r.done ? '결과 보기' : '이어서 하기';
     return `<div class="exp-card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${esc(e.name)}</h3><span class="pill ${cls}">${esc(st)}</span></div>
       <div class="small">${esc(e.desc||'')}</div>
-      <div class="meta">문항 ${CORE.length+e.extras.length}개</div>
+      <div class="meta">측정량: ${esc(e.quantity||'-')} ${e.theory!=null?`· 이론값 ${esc(e.theory)} ${esc(e.unit||'')}`:''} · 문항 ${CORE.length+e.extras.length}개</div>
       <div><button class="btn pri sm" data-act="open" data-id="${esc(e.id)}">${label}</button></div></div>`;
   }).join('') : `<div class="empty">아직 등록된 실험이 없어요.</div>`;
-  return `<div class="card"><h1>실험 자기평가</h1><p class="muted" style="margin:0 0 14px">실험 전에 내 이해도를 체크하고, 실험 후에 다시 체크해서 얼마나 달라졌는지 확인해요.</p>
+  return `<div class="card"><h1>실험 자기평가</h1><p class="muted" style="margin:0 0 14px">실험 전에 내 이해도를 체크하고, 측정 결과를 입력한 뒤, 실험 후에 다시 체크해요. 마지막에 내 자기평가가 실제 결과와 얼마나 맞았는지 보여 줘요.</p>
     <div class="row"><div class="field"><label>이름</label><input type="text" id="pName" value="${esc(my.name||'')}" placeholder="홍길동"></div>
     <div class="field"><label>학번</label><input type="text" id="pSid" value="${esc(my.sid||'')}" placeholder="20261234"></div></div>
     <div class="hint">이름과 학번은 교수자의 결과 분석에 표시돼요.</div></div>
@@ -247,17 +309,19 @@ function homeHTML(){
 }
 
 /* ===================== 렌더: 학생 진행 흐름 ===================== */
-const STEPS = ['사전 자기평가','사후 자기평가','결과 요약'];
+const STEPS = ['사전 자기평가','측정 결과 입력','사후 자기평가','결과 분석'];
 function curExp(){ return S.exps.find(e=>e.id===S.expId); }
 function flowHTML(){
   const exp=curExp(); if(!exp){ S.expId=null; return homeHTML(); }
   const r=rec(exp.id), step=r.step||1;
   const stepper = `<div class="stepper">${STEPS.map((s,i)=>`<div class="${i+1===step?'on':(i+1<step||r.done)?'done':''}"><b>${i+1}단계</b>${s}</div>`).join('')}</div>`;
   let body='';
-  if(step===1) body = rubricHTML(exp,'pre');
-  if(step===2) body = rubricHTML(exp,'post') + `<div class="card"><h3>성찰 메모 (선택)</h3><textarea data-f="reflection" placeholder="실험하면서 새로 알게 된 점, 어려웠던 점">${esc(r.post.reflection||'')}</textarea></div>`;
-  if(step===3) body = summaryHTML(exp, r);
-  const nextLabel = step===2 ? '제출하고 결과 보기' : step===3 ? '' : '다음';
+  if(step===1) body = rubricHTML(exp,'pre') + `<div class="card"><h3>오차율 예측</h3><p class="small muted" style="margin-top:0">실험하기 전에, 내 측정값이 이론값과 몇 % 정도 차이 날지 예상해 보세요. 실험 후 실제 오차율과 비교해요.</p>
+      <div class="row"><div class="field" style="max-width:220px"><label>예상 오차율 (%)</label><input type="number" min="0" step="0.1" data-f="predErr" value="${esc(r.pre.predErr??'')}" placeholder="예: 5"></div></div></div>`;
+  if(step===2) body = measureHTML(exp, r);
+  if(step===3) body = rubricHTML(exp,'post') + `<div class="card"><h3>성찰 메모 (선택)</h3><textarea data-f="reflection" placeholder="실험하면서 새로 알게 된 점, 어려웠던 점, 다음에 바꿔 볼 점">${esc(r.post.reflection||'')}</textarea></div>`;
+  if(step===4) body = resultHTML(exp, r);
+  const nextLabel = step===3 ? '제출하고 결과 보기' : step===4 ? '' : '다음';
   return `<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px"><div><button class="btn sm" data-act="home">← 실험 목록</button></div><span class="muted small">${esc(S.my&&S.my.name||'')} ${esc(S.my&&S.my.sid||'')}</span></div>
     <h1>${esc(exp.name)}</h1><p class="muted" style="margin:0 0 8px">${esc(exp.desc||'')}</p>${stepper}${body}
     <div class="navbar"><div>${step>1?`<button class="btn" data-act="step" data-d="-1">이전</button>`:''}</div>
@@ -279,24 +343,84 @@ function rubricHTML(exp, part){
   const sub = part==='pre' ? '지금 내 상태에 가장 가까운 단계를 고르세요. 정답은 없어요.' : '실험을 마친 지금 기준으로 다시 골라 보세요. 괄호 안은 실험 전에 고른 단계예요.';
   return `<div class="card"><h2 style="margin-bottom:2px">${title}</h2><p class="small muted" style="margin:0 0 6px">${sub}</p>${items}</div>`;
 }
-function summaryHTML(exp, r){
-  const pre=dimScores(exp, r.pre), post=dimScores(exp, r.post);
-  const tp=total(exp,pre), tq=total(exp,post);
-  const rows = dims(exp).map(d=>{ const a=pre[d.id], b=post[d.id]; const g=(a!=null&&b!=null)?b-a:null;
-    return `<tr><td>${esc(d.name)}</td><td class="num">${fmt(a,1)}</td><td class="num">${fmt(b,1)}</td><td class="num">${g==null?'–':(g>=0?'+':'')+fmt(g,1)}</td></tr>`; }).join('');
-  return `<div class="kpis">
-    <div class="kpi"><div class="l">사전 자기평가</div><div class="v">${fmt(tp,0)}</div><div class="s">100점 환산</div></div>
-    <div class="kpi"><div class="l">사후 자기평가</div><div class="v">${fmt(tq,0)}</div><div class="s">${(tp!=null&&tq!=null)?((tq-tp>=0?'+':'')+fmt(tq-tp,0)+'점 변화'):''}</div></div></div>
-    <div class="card"><h3>항목별 변화</h3><div class="tablewrap"><table><thead><tr><th>항목</th><th class="num">실험 전</th><th class="num">실험 후</th><th class="num">변화</th></tr></thead><tbody>${rows}</tbody></table></div></div>
-    <div class="row"><button class="btn" data-act="redo">자기평가 다시 하기</button></div>`;
-}
 function countAnswered(exp, part){
   const r=rec(exp.id)[part]; const its=rubricItems(exp);
   return [its.filter(it=>num(r[it.key][it.id])).length, its.length];
 }
+function measureHTML(exp, r){
+  const m=r.measure, ht=exp.inputMode==='ht';
+  const n = ht ? Math.max(m.h.length, m.t.length) : m.values.length;
+  let rows='';
+  for(let i=0;i<n;i++){
+    if(ht){
+      const h=num(m.h[i]), t=num(m.t[i]); const g = (h>0&&t>0)?2*h/(t*t):null;
+      rows += `<tr><td>${i+1}</td><td><input type="number" step="any" data-m="h" data-i="${i}" value="${esc(m.h[i]??'')}" placeholder="m"></td><td><input type="number" step="any" data-m="t" data-i="${i}" value="${esc(m.t[i]??'')}" placeholder="s"></td><td class="num" id="g${i}">${fmt(g,3)}</td><td><button class="btn sm danger" data-act="delrow" data-i="${i}" ${n<=1?'disabled':''}>삭제</button></td></tr>`;
+    } else {
+      rows += `<tr><td>${i+1}</td><td><input type="number" step="any" data-m="values" data-i="${i}" value="${esc(m.values[i]??'')}" placeholder="${esc(exp.unit||'')}"></td><td><button class="btn sm danger" data-act="delrow" data-i="${i}" ${n<=1?'disabled':''}>삭제</button></td></tr>`;
+    }
+  }
+  const head = ht ? `<tr><th>회차</th><th>낙하 높이 h (m)</th><th>낙하 시간 t (s)</th><th class="num">g = 2h/t² (m/s²)</th><th></th></tr>` : `<tr><th>회차</th><th>측정값 ${esc(exp.quantity||'')} (${esc(exp.unit||'')})</th><th></th></tr>`;
+  return `<div class="card"><h2>측정 결과 입력</h2><p class="small muted" style="margin-top:-6px">${ht?'회차마다 낙하 높이와 시간을 입력하면 g가 자동으로 계산돼요.':'회차마다 측정한 값을 입력하세요.'} 표준편차를 구하려면 2회 이상, 신뢰할 만한 결과를 위해 5회 이상을 권장해요.</p>
+    <div class="tablewrap"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+    <div style="margin-top:10px"><button class="btn sm" data-act="addrow">+ 회차 추가</button></div></div>
+    <div class="card"><h3>실시간 통계</h3><div id="statsBox">${statsHTML(exp, r)}</div></div>`;
+}
+function statsHTML(exp, r){
+  const st = stats(rowsToValues(exp, r.measure), exp.theory); const u=esc(exp.unit||'');
+  if(!st.n) return `<div class="muted small">유효한 측정값을 입력하면 통계가 계산돼요.</div>`;
+  const a = accScore(st.relErr, exp.tol);
+  const judge = a==null ? '' : a>=3 ? `<span class="pill good">허용 오차(${exp.tol}%) 이내</span>` : `<span class="pill ${a===2?'warn':'bad'}">허용 오차(${exp.tol}%) 초과</span>`;
+  return `<div class="tablewrap"><table><tbody>
+    <tr><th>유효 측정 횟수 n</th><td class="num">${st.n}</td><th>이론값</th><td class="num">${exp.theory!=null?esc(exp.theory)+' '+u:'–'}</td></tr>
+    <tr><th>평균</th><td class="num">${fmt(st.mean,4)} ${u}</td><th>오차율</th><td class="num">${fmt(st.relErr,2)} % ${judge}</td></tr>
+    <tr><th>표준편차 (n−1)</th><td class="num">${fmt(st.sd,4)}</td><th>변동계수</th><td class="num">${fmt(st.cv,2)} %</td></tr>
+    <tr><th>표준오차</th><td class="num">${fmt(st.se,4)}</td><th>95% 신뢰구간</th><td class="num">${st.ci?`${fmt(st.ci[0],3)} ~ ${fmt(st.ci[1],3)}`:'–'}</td></tr>
+  </tbody></table></div>${st.inCI===false?`<div class="hint">이론값이 95% 신뢰구간 밖에 있어요. 우연 오차보다는 계통 오차(장비·방법의 치우침)가 있을 가능성이 커요.</div>`:st.inCI===true?`<div class="hint">이론값이 95% 신뢰구간 안에 있어요. 측정값과 이론값의 차이는 통계적으로 의미 있다고 보기 어려워요.</div>`:''}`;
+}
+function resultHTML(exp, r){
+  const A = analyze(exp, r, S.cfg); const st=A.st;
+  const c = A.calib ? CALIB[A.calib] : null;
+  const fbs = feedback(exp, A);
+  return `<div class="kpis">
+    <div class="kpi"><div class="l">사전 자기평가</div><div class="v">${fmt(A.preTotal,0)}</div><div class="s">100점 환산 (가중치 반영)</div></div>
+    <div class="kpi"><div class="l">사후 자기평가</div><div class="v">${fmt(A.postTotal,0)}</div><div class="s">${A.growth!=null?(A.growth>=0?'+':'')+fmt(A.growth,0)+'점 변화':''}</div></div>
+    <div class="kpi"><div class="l">실제 오차율</div><div class="v">${fmt(st.relErr,1)}%</div><div class="s">${A.pred!=null?`예상 ${fmt(A.pred,1)}%`:'예상값 없음'}</div></div>
+    <div class="kpi"><div class="l">메타인지 판정</div><div class="v" style="font-size:18px;margin-top:6px">${c?`<span class="pill ${c[1]}" style="font-size:14px">${c[0]}</span>`:'–'}</div><div class="s">자기평가 ${fmt(A.selfSkill,1)} vs 실제 ${A.actual??'–'} (4단계 기준)</div></div>
+    <div class="kpi"><div class="l">종합 지수</div><div class="v">${fmt(A.composite,0)}</div><div class="s">자기평가 ${S.cfg.rubricRatio}% + 측정 정확도 ${100-S.cfg.rubricRatio}%</div></div>
+  </div>
+  <div class="grid g2"><div class="card"><h3>항목별 변화 (실험 전 vs 후)</h3><div class="chartbox"><canvas id="cRadar"></canvas></div></div>
+  <div class="card"><h3>피드백</h3>${fbs.map(f=>`<div class="fb ${f[1]}">${f[0]}</div>`).join('')}</div></div>
+  <div class="card"><h3>측정 통계</h3>${statsHTML(exp, r)}</div>
+  <div class="row"><button class="btn" data-act="redo">자기평가 다시 하기</button></div>`;
+}
+function feedback(exp, A){
+  const out=[]; const D=dims(exp);
+  const growths = D.map(d=>({d, g:(A.post[d.id]??0)-(A.pre[d.id]??0)})).sort((a,b)=>b.g-a.g);
+  if(growths[0] && growths[0].g>0) out.push([`가장 많이 성장한 항목은 <b>${esc(growths[0].d.name)}</b>이에요 (+${fmt(growths[0].g,1)}단계).`,'good']);
+  const lows = D.filter(d=>A.post[d.id]!=null).sort((a,b)=>A.post[a.id]-A.post[b.id]);
+  if(lows[0] && A.post[lows[0].id] < 3) out.push([`<b>${esc(lows[0].name)}</b> 항목이 아직 ${fmt(A.post[lows[0].id],1)}단계예요. 다음 실험에서 우선 보완해 보세요.`,'warn']);
+  if(A.calib==='over') out.push([`측정·데이터·오차 분석 능력을 평균 ${fmt(A.selfSkill,1)}단계로 평가했지만, 실제 측정 정확도는 ${A.actual}단계 수준이에요. 측정 과정을 다시 점검해 보세요.`,'bad']);
+  if(A.calib==='under') out.push([`실제 측정 정확도(${A.actual}단계)가 자기평가(${fmt(A.selfSkill,1)}단계)보다 높아요. 생각보다 잘하고 있어요.`,'warn']);
+  if(A.calib==='ok') out.push([`자기평가와 실제 측정 결과가 잘 맞아요. 자기 수준을 정확하게 파악하고 있어요.`,'good']);
+  if(A.predGap!=null) out.push([Math.abs(A.predGap)<=2 ? `오차율 예측이 정확했어요 (예상 ${fmt(A.pred,1)}%, 실제 ${fmt(A.st.relErr,1)}%).` : A.predGap>0 ? `실제 오차율이 예상보다 ${fmt(A.predGap,1)}%p 컸어요. 예상하지 못한 오차 요인이 있었는지 생각해 보세요.` : `실제 오차율이 예상보다 ${fmt(-A.predGap,1)}%p 작았어요.`, '']);
+  if(A.st.n && A.st.n<5) out.push([`측정 횟수가 ${A.st.n}회예요. 5회 이상 측정하면 통계 결과를 더 믿을 수 있어요.`,'']);
+  if(!out.length) out.push(['측정값과 자기평가를 모두 입력하면 피드백이 나와요.','']);
+  return out;
+}
+function afterFlow(){
+  const exp=curExp(); if(!exp) return; const r=rec(exp.id);
+  updateProgress();
+  if(r.step===4 && window.Chart){
+    const D=dims(exp), A=analyze(exp,r,S.cfg);
+    charts.radar = new Chart($('#cRadar'), {type:'radar', data:{labels:D.map(d=>d.name), datasets:[
+      {label:'실험 전', data:D.map(d=>A.pre[d.id]??null), borderColor:'#98a2b3', backgroundColor:'rgba(152,162,179,.15)', pointRadius:3},
+      {label:'실험 후', data:D.map(d=>A.post[d.id]??null), borderColor:'#2453c4', backgroundColor:'rgba(36,83,196,.15)', pointRadius:3}]},
+      options:{maintainAspectRatio:false, scales:{r:{min:0,max:4,ticks:{stepSize:1}}}, plugins:{legend:{position:'bottom'}}}});
+  }
+}
 function updateProgress(){
   const exp=curExp(); const el=$('#progress'); if(!exp||!el) return; const r=rec(exp.id);
-  if(r.step===1||r.step===2){ const [a,b]=countAnswered(exp, r.step===1?'pre':'post'); el.textContent=`${a}/${b} 문항 응답`; }
+  if(r.step===1||r.step===3){ const [a,b]=countAnswered(exp, r.step===1?'pre':'post'); el.textContent=`${a}/${b} 문항 응답`; }
   else el.textContent='';
 }
 
@@ -326,22 +450,38 @@ async function handle(act, b){
     if(S.saving) return;
     const exp=curExp(), r=rec(exp.id), d=+b.dataset.d;
     if(d>0){
-      const [a,n]=countAnswered(exp, r.step===1?'pre':'post'); if(a<n){ toast(`아직 ${n-a}개 문항에 답하지 않았어요.`); return; }
-      if(r.step===2) r.done=true;
+      if(r.step===1 || r.step===3){ const [a,n]=countAnswered(exp, r.step===1?'pre':'post'); if(a<n){ toast(`아직 ${n-a}개 문항에 답하지 않았어요.`); return; } }
+      if(r.step===2){ const v=rowsToValues(exp, r.measure); if(v.length<1){ toast('유효한 측정값을 1개 이상 입력해 주세요.'); return; } }
+      if(r.step===3) r.done=true;
     }
-    const prev=r.step; r.step=Math.max(1, Math.min(3, (r.step||1)+d));
+    const prev=r.step; r.step=Math.max(1, Math.min(4, (r.step||1)+d));
     const ok = await saveMy();
-    if(!ok && d>0){ r.step=prev; if(prev===2) r.done=false; return; }
+    if(!ok && d>0){ r.step=prev; if(prev===3) r.done=false; return; }
     render(); window.scrollTo(0,0); return;
   }
+  if(act==='addrow'){
+    const exp=curExp(), m=rec(exp.id).measure;
+    if(exp.inputMode==='ht'){ const last=m.h[m.h.length-1]||''; m.h.push(last); m.t.push(''); } else m.values.push('');
+    render(); return;
+  }
+  if(act==='delrow'){
+    const exp=curExp(), m=rec(exp.id).measure, i=+b.dataset.i;
+    if(exp.inputMode==='ht'){ m.h.splice(i,1); m.t.splice(i,1); } else m.values.splice(i,1);
+    render(); return;
+  }
   if(act==='redo'){
-    const ok = await askConfirm('사전·사후 자기평가를 처음부터 다시 할까요? 지금 결과는 지워져요.', '다시 하기');
+    const ok = await askConfirm('사전·사후 자기평가와 측정값을 처음부터 다시 입력할까요? 지금 결과는 지워져요.', '다시 하기');
     if(!ok) return; delete S.my.exps[S.expId]; rec(S.expId); await saveMy(); render(); window.scrollTo(0,0); return;
   }
 }
 document.addEventListener('input', ev=>{
   const t=ev.target;
-  if(t.dataset.f){ const exp=curExp(); if(!exp) return; rec(exp.id).post.reflection=t.value; return; }
+  if(t.dataset.m!=null){
+    const exp=curExp(); if(!exp) return; const r=rec(exp.id); r.measure[t.dataset.m][+t.dataset.i]=t.value;
+    if(exp.inputMode==='ht'){ const i=+t.dataset.i, h=num(r.measure.h[i]), tt=num(r.measure.t[i]); const c=$('#g'+i); if(c) c.textContent=fmt((h>0&&tt>0)?2*h/(tt*tt):null,3); }
+    const sb=$('#statsBox'); if(sb) sb.innerHTML=statsHTML(exp, r); return;
+  }
+  if(t.dataset.f){ const exp=curExp(); if(!exp) return; const r=rec(exp.id); if(t.dataset.f==='predErr') r.pre.predErr=t.value; else r.post.reflection=t.value; return; }
 });
 document.addEventListener('change', ev=>{
   const t=ev.target;
