@@ -107,6 +107,7 @@ td input{padding:6px 8px}
 <header>
   <div class="hwrap">
     <div class="brand">물리 실험 자기평가 루브릭<small>실험 전후 이해도 체크 · 오차 분석 · 메타인지</small></div>
+    <div class="tabs" id="tabs"></div>
   </div>
 </header>
 <div id="banner"></div>
@@ -145,7 +146,10 @@ const clone = o => JSON.parse(JSON.stringify(o ?? null));
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
 const fmt = (n, d=2) => (n==null || !Number.isFinite(n)) ? '–' : n.toFixed(d);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const rid = p => p + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2600); }
+function withTimeout(p, ms=10000){ return Promise.race([p, sleep(ms).then(()=>{ throw {code:'timeout', message:'응답 시간 초과'}; })]); }
+async function safe(fn){ try { return await fn(); } catch(e){ return null; } }
 function askConfirm(msg, okText='삭제'){
   return new Promise(res=>{
     $('#modalbox').innerHTML = `<h3>확인</h3><p>${esc(msg)}</p><div class="navbar"><span></span><div class="row"><button class="btn" id="mNo">취소</button><button class="btn pri" id="mYes">${esc(okText)}</button></div></div>`;
@@ -155,29 +159,95 @@ function askConfirm(msg, okText='삭제'){
   });
 }
 function mergeCfg(c){ const d=clone(DEFAULT_CFG); if(c){ Object.assign(d.weights, c.weights||{}); if(Number.isFinite(c.rubricRatio)) d.rubricRatio=c.rubricRatio; } return d; }
-function errMsg(e){ return '저장하지 못했어요. 브라우저 저장 공간을 확인해 주세요.'; }
+function errMsg(e){
+  if(e && e.code==='invalid_argument') return '저장 권한이 없어요. 교수자에게 이 페이지의 참여(Contributor) 권한을 요청하세요.';
+  if(e && e.code==='timeout') return '서버 응답이 늦어요. 잠시 후 다시 시도해 주세요.';
+  if(e && e.code==='quota_exceeded') return '저장 공간이 가득 찼어요. 교수자에게 알려 주세요.';
+  return '저장하지 못했어요. 잠시 후 다시 시도해 주세요.';
+}
 
 /* ===================== 상태 ===================== */
-const S = { mode:'loading', uid:null, cfg:mergeCfg(null), exps:[], my:null,
-  expId:null, saving:false };
+const S = { mode:'loading', uid:null, isAdmin:false, isOwner:false, cfg:mergeCfg(null), exps:[], my:null, resps:[],
+  view:'student', expId:null, ptab:'analysis', pexp:null, edit:null, saving:false };
 const charts = {};
 function killChart(k){ if(charts[k]){ charts[k].destroy(); delete charts[k]; } }
 
-/* ===================== 저장소 (브라우저 localStorage) ===================== */
+/* ===================== 저장소 (db 또는 로컬 미리보기) ===================== */
 const Local = {
-  key:'physics-rubric-day2', mem:null,
+  key:'physics-rubric-day3', mem:null,
   load(){ if(this.mem) return this.mem; let o=null; try{ o=JSON.parse(localStorage.getItem(this.key)); }catch(e){} this.mem=o||{}; return this.mem; },
   save(){ try{ localStorage.setItem(this.key, JSON.stringify(this.mem)); }catch(e){} }
 };
+const queues = {};
+function enqueue(path, fn){ const p=(queues[path]||Promise.resolve()).catch(()=>{}).then(fn); queues[path]=p; return p; }
+async function getCap(name){
+  if(!window.claude || typeof window.claude.use!=='function') return null;
+  try { return await Promise.race([window.claude.use(name), sleep(10000).then(()=>null)]); } catch(e){ return null; }
+}
 const API = {
-  async init(){ S.mode='local'; S.uid='local-me'; },
-  async loadAll(){
-    const L = Local.load();
-    S.cfg = mergeCfg(L.cfg); S.exps = clone(LOCAL_SEED);
-    S.my = clone((L.resps||{})[S.uid] || null);
-    S.exps.forEach(normExp);
+  db:null, user:null,
+  async init(){
+    const [db, user] = await Promise.all([getCap('db'), getCap('user')]);
+    if(db && user){
+      const id = await safe(()=>user.id());
+      if(id){
+        this.db=db; this.user=user; S.uid=id; S.mode='db';
+        S.isOwner = !!(await safe(()=>user.isOwner()));
+        S.isAdmin = S.isOwner || !!(await safe(()=>user.canEdit()));
+        return;
+      }
+    }
+    S.mode='local'; S.uid='local-me'; S.isAdmin=true; S.isOwner=true;
   },
-  async saveResp(id, doc){ const L=Local.load(); L.resps=L.resps||{}; L.resps[id]=clone(doc); Local.save(); }
+  async loadAll(){
+    if(S.mode==='db'){
+      const [c,e,m] = await Promise.all([
+        withTimeout(this.db.doc('config/main').get()),
+        withTimeout(this.db.collection('experiments').get()),
+        withTimeout(this.db.doc('responses/'+S.uid).get())]);
+      S.cfg = mergeCfg(c.exists ? c.data() : null);
+      S.exps = e.docs.map(d=>({id:d.id, ...clone(d.data())}));
+      S.my = m.exists ? clone(m.data()) : null;
+      if(S.isAdmin) await this.loadResponses();
+    } else {
+      const L = Local.load();
+      if(!L.exps){ L.exps = clone(LOCAL_SEED); Local.save(); }
+      S.cfg = mergeCfg(L.cfg); S.exps = clone(L.exps);
+      S.my = clone((L.resps||{})[S.uid] || null);
+      await this.loadResponses();
+    }
+    S.exps.forEach(normExp);
+    S.exps.sort((a,b)=>(a.order||0)-(b.order||0) || String(a.name).localeCompare(String(b.name)));
+  },
+  async loadResponses(){
+    if(S.mode==='db'){
+      const q = await withTimeout(this.db.collection('responses').get());
+      S.resps = q.docs.map(d=>({id:d.id, ...clone(d.data())}));
+    } else {
+      const L = Local.load(); S.resps = Object.entries(L.resps||{}).map(([id,d])=>({id, ...clone(d)}));
+    }
+  },
+  async saveConfig(cfg){
+    if(S.mode==='db') return enqueue('config/main', ()=>withTimeout(this.db.doc('config/main').set(clone(cfg))));
+    Local.load().cfg = clone(cfg); Local.save();
+  },
+  async saveExp(exp){
+    const body = clone(exp); delete body.id;
+    if(S.mode==='db') return enqueue('experiments/'+exp.id, ()=>withTimeout(this.db.doc('experiments/'+exp.id).set(body)));
+    const L=Local.load(); const i=L.exps.findIndex(x=>x.id===exp.id); if(i>=0) L.exps[i]=clone(exp); else L.exps.push(clone(exp)); Local.save();
+  },
+  async delExp(id){
+    if(S.mode==='db') return enqueue('experiments/'+id, ()=>withTimeout(this.db.doc('experiments/'+id).delete()));
+    const L=Local.load(); L.exps=L.exps.filter(x=>x.id!==id); Local.save();
+  },
+  async saveResp(id, doc){
+    if(S.mode==='db') return enqueue('responses/'+id, ()=>withTimeout(this.db.doc('responses/'+id).set(clone(doc))));
+    const L=Local.load(); L.resps=L.resps||{}; L.resps[id]=clone(doc); Local.save();
+  },
+  async delResp(id){
+    if(S.mode==='db') return enqueue('responses/'+id, ()=>withTimeout(this.db.doc('responses/'+id).delete()));
+    const L=Local.load(); if(L.resps) delete L.resps[id]; Local.save();
+  }
 };
 function normExp(e){
   e.extras = Array.isArray(e.extras) ? e.extras.filter(x=>x && x.id) : [];
@@ -272,15 +342,22 @@ async function saveMy(){
 }
 
 /* ===================== 렌더: 공통 ===================== */
+function renderTabs(){
+  const t=$('#tabs');
+  if(!S.isAdmin){ t.innerHTML=''; t.style.display='none'; return; }
+  t.style.display='flex';
+  t.innerHTML = `<button data-act="view" data-v="student" class="${S.view==='student'?'on':''}">학생 자기평가</button><button data-act="view" data-v="prof" class="${S.view==='prof'?'on':''}">교수자 대시보드</button>`;
+}
 function renderBanner(){
   $('#banner').innerHTML = S.mode==='local'
-    ? `<div class="note">데이터는 이 브라우저에 저장돼요. (교수자 대시보드와 서버 저장은 다음 단계에서 추가 예정)</div>` : '';
+    ? `<div class="note">미리보기 모드예요. 데이터가 이 브라우저에만 저장되고, 학생 화면과 교수자 화면을 모두 볼 수 있어요.</div>` : '';
 }
 function render(){
-  renderBanner();
+  renderTabs(); renderBanner();
   Object.keys(charts).forEach(killChart);
   const app=$('#app');
-  if(S.expId){ app.innerHTML = flowHTML(); afterFlow(); }
+  if(S.view==='prof' && S.isAdmin){ app.innerHTML = profHTML(); afterProf(); }
+  else if(S.expId){ app.innerHTML = flowHTML(); afterFlow(); }
   else app.innerHTML = homeHTML();
 }
 
@@ -300,7 +377,7 @@ function homeHTML(){
       <div class="small">${esc(e.desc||'')}</div>
       <div class="meta">측정량: ${esc(e.quantity||'-')} ${e.theory!=null?`· 이론값 ${esc(e.theory)} ${esc(e.unit||'')}`:''} · 문항 ${CORE.length+e.extras.length}개</div>
       <div><button class="btn pri sm" data-act="open" data-id="${esc(e.id)}">${label}</button></div></div>`;
-  }).join('') : `<div class="empty">아직 등록된 실험이 없어요.</div>`;
+  }).join('') : `<div class="empty">아직 등록된 실험이 없어요.${S.isAdmin?' 교수자 대시보드의 "실험 관리"에서 실험을 추가해 주세요.':' 교수자가 실험을 등록하면 여기에 나타나요.'}</div>`;
   return `<div class="card"><h1>실험 자기평가</h1><p class="muted" style="margin:0 0 14px">실험 전에 내 이해도를 체크하고, 측정 결과를 입력한 뒤, 실험 후에 다시 체크해요. 마지막에 내 자기평가가 실제 결과와 얼마나 맞았는지 보여 줘요.</p>
     <div class="row"><div class="field"><label>이름</label><input type="text" id="pName" value="${esc(my.name||'')}" placeholder="홍길동"></div>
     <div class="field"><label>학번</label><input type="text" id="pSid" value="${esc(my.sid||'')}" placeholder="20261234"></div></div>
@@ -424,6 +501,125 @@ function updateProgress(){
   else el.textContent='';
 }
 
+/* ===================== 렌더: 교수자 ===================== */
+function profHTML(){
+  const tabs = [['analysis','응답 분석'],['exps','실험 관리'],['weights','가중치 설정']];
+  const st = `<div class="subtabs">${tabs.map(([k,l])=>`<button data-act="ptab" data-v="${k}" class="${S.ptab===k?'on':''}">${l}</button>`).join('')}</div>`;
+  if(S.ptab==='exps') return st + expsHTML();
+  if(S.ptab==='weights') return st + weightsHTML();
+  return st + analysisHTML();
+}
+function respRows(exp){
+  return S.resps.filter(p=>p.exps && p.exps[exp.id]).map(p=>{ const r=p.exps[exp.id]; return {p, r, A:analyze(exp, normRec(r), S.cfg)}; });
+}
+function normRec(r){ const o=clone(r)||{}; o.pre=o.pre||{scores:{},extras:{}}; o.post=o.post||{scores:{},extras:{}}; o.pre.scores=o.pre.scores||{}; o.pre.extras=o.pre.extras||{}; o.post.scores=o.post.scores||{}; o.post.extras=o.post.extras||{}; o.measure=o.measure||{}; return o; }
+const avg = a => { const v=a.filter(x=>x!=null&&Number.isFinite(x)); return v.length ? v.reduce((s,x)=>s+x,0)/v.length : null; };
+function analysisHTML(){
+  if(!S.exps.length) return `<div class="card empty">등록된 실험이 없어요. "실험 관리"에서 먼저 실험을 추가해 주세요.</div>`;
+  if(!S.pexp || !S.exps.find(e=>e.id===S.pexp)) S.pexp=S.exps[0].id;
+  const exp=S.exps.find(e=>e.id===S.pexp);
+  const rows=respRows(exp), done=rows.filter(x=>x.r.done);
+  const cnt={over:0,ok:0,under:0}; done.forEach(x=>{ if(x.A.calib) cnt[x.A.calib]++; });
+  const hasSample = S.resps.some(p=>p.sample);
+  const sel = `<select data-act="pexp">${S.exps.map(e=>`<option value="${esc(e.id)}" ${e.id===S.pexp?'selected':''}>${esc(e.name)}</option>`).join('')}</select>`;
+  const tools = `<div class="row" style="align-items:center;margin-bottom:16px"><div style="min-width:220px">${sel}</div>
+    <button class="btn sm" data-act="refresh">새로고침</button><button class="btn sm" data-act="csv">CSV 복사</button>
+    ${S.isOwner?`<button class="btn sm" data-act="sample">샘플 응답 15개 생성</button>`:''}${S.isOwner&&hasSample?`<button class="btn sm danger" data-act="unsample">샘플 응답 삭제</button>`:''}</div>`;
+  if(!rows.length) return tools + `<div class="card empty">아직 이 실험에 대한 응답이 없어요.${S.isOwner?' 발표나 테스트용으로 "샘플 응답 생성"을 눌러 볼 수 있어요.':''}</div>`;
+  const kp = `<div class="kpis">
+    <div class="kpi"><div class="l">참여 / 완료</div><div class="v">${rows.length} / ${done.length}</div><div class="s">명</div></div>
+    <div class="kpi"><div class="l">평균 자기평가 (전 → 후)</div><div class="v">${fmt(avg(done.map(x=>x.A.preTotal)),0)} → ${fmt(avg(done.map(x=>x.A.postTotal)),0)}</div><div class="s">100점 환산</div></div>
+    <div class="kpi"><div class="l">평균 오차율</div><div class="v">${fmt(avg(done.map(x=>x.A.st.relErr)),1)}%</div><div class="s">허용 기준 ${exp.tol}%</div></div>
+    <div class="kpi"><div class="l">메타인지 분포</div><div class="v" style="font-size:16px;margin-top:6px"><span class="pill bad">과대 ${cnt.over}</span> <span class="pill good">양호 ${cnt.ok}</span> <span class="pill warn">과소 ${cnt.under}</span></div><div class="s">완료한 학생 기준</div></div>
+  </div>`;
+  const charts = `<div class="grid g2"><div class="card"><h3>항목별 평균 (실험 전 vs 후)</h3><div class="chartbox"><canvas id="cBar"></canvas></div></div>
+    <div class="card"><h3>예상 오차율 vs 실제 오차율</h3><div class="chartbox"><canvas id="cScatter"></canvas></div><div class="hint">대각선에 가까울수록 자기 실험 정확도를 잘 예측한 학생이에요. 대각선 위쪽은 오차를 과소 예측한 경우예요.</div></div></div>`;
+  const sorted = rows.slice().sort((a,b)=>String(a.p.sid||'').localeCompare(String(b.p.sid||'')));
+  const table = `<div class="card"><h3>학생별 결과</h3><div class="tablewrap"><table><thead><tr><th>학번</th><th>이름</th><th>상태</th><th class="num">사전</th><th class="num">사후</th><th class="num">변화</th><th class="num">n</th><th class="num">평균</th><th class="num">오차율</th><th>메타인지</th><th class="num">종합</th></tr></thead><tbody>
+    ${sorted.map(({p,r,A})=>{ const c=A.calib?CALIB[A.calib]:null; return `<tr><td>${esc(p.sid||'')}</td><td>${esc(p.name||'(이름 없음)')}${p.sample?' <span class="pill">샘플</span>':''}</td><td>${r.done?'<span class="pill good">완료</span>':`<span class="pill pri">${r.step||1}단계</span>`}</td>
+      <td class="num">${fmt(A.preTotal,0)}</td><td class="num">${fmt(A.postTotal,0)}</td><td class="num">${A.growth!=null?(A.growth>=0?'+':'')+fmt(A.growth,0):'–'}</td><td class="num">${A.st.n||0}</td><td class="num">${fmt(A.st.mean,3)}</td><td class="num">${fmt(A.st.relErr,1)}%</td><td>${c?`<span class="pill ${c[1]}">${c[0]}</span>`:'–'}</td><td class="num">${fmt(A.composite,0)}</td></tr>`; }).join('')}
+  </tbody></table></div></div>`;
+  return tools + kp + charts + table;
+}
+function afterProf(){
+  if(S.ptab!=='analysis' || !window.Chart) return;
+  const exp=S.exps.find(e=>e.id===S.pexp); if(!exp) return;
+  const done=respRows(exp).filter(x=>x.r.done); if(!done.length || !$('#cBar')) return;
+  const D=dims(exp);
+  charts.bar = new Chart($('#cBar'), {type:'bar', data:{labels:D.map(d=>d.name), datasets:[
+    {label:'실험 전', data:D.map(d=>avg(done.map(x=>x.A.pre[d.id]??null))), backgroundColor:'#c3cad6', borderRadius:4},
+    {label:'실험 후', data:D.map(d=>avg(done.map(x=>x.A.post[d.id]??null))), backgroundColor:'#2453c4', borderRadius:4}]},
+    options:{maintainAspectRatio:false, scales:{y:{min:0,max:4,ticks:{stepSize:1}}}, plugins:{legend:{position:'bottom'}}}});
+  const pts = done.filter(x=>x.A.pred!=null && x.A.st.relErr!=null).map(x=>({x:x.A.pred, y:x.A.st.relErr, name:x.p.name}));
+  const mx = Math.max(10, ...pts.map(p=>Math.max(p.x,p.y))) * 1.1;
+  charts.sc = new Chart($('#cScatter'), {type:'scatter', data:{datasets:[
+    {label:'학생', data:pts, backgroundColor:'#2453c4', pointRadius:5},
+    {label:'예측 = 실제', type:'line', data:[{x:0,y:0},{x:mx,y:mx}], borderColor:'#98a2b3', borderDash:[5,4], pointRadius:0, borderWidth:1.5}]},
+    options:{maintainAspectRatio:false, scales:{x:{min:0,max:mx,title:{display:true,text:'예상 오차율 (%)'}}, y:{min:0,max:mx,title:{display:true,text:'실제 오차율 (%)'}}},
+      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:c=>c.raw.name?`${c.raw.name}: 예상 ${fmt(c.raw.x,1)}%, 실제 ${fmt(c.raw.y,1)}%`:''}}}}});
+}
+function expsHTML(){
+  if(S.edit) return expFormHTML();
+  const list = S.exps.length ? S.exps.map(e=>`<div class="exp-card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${esc(e.name)}</h3><span class="pill">${e.inputMode==='ht'?'높이·시간 입력':'측정값 직접 입력'}</span></div>
+    <div class="small">${esc(e.desc||'')}</div><div class="meta">측정량 ${esc(e.quantity||'-')} · 이론값 ${e.theory??'–'} ${esc(e.unit||'')} · 허용 오차 ${e.tol}% · 추가 문항 ${e.extras.length}개</div>
+    ${e.extras.length?`<div class="small muted">${e.extras.map((x,i)=>`${i+1}. ${esc(x.q)}`).join('<br>')}</div>`:''}
+    <div class="row"><button class="btn sm" data-act="editexp" data-id="${esc(e.id)}">수정</button><button class="btn sm danger" data-act="delexp" data-id="${esc(e.id)}">삭제</button></div></div>`).join('')
+    : `<div class="empty">등록된 실험이 없어요.</div>`;
+  return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><div><h2 style="margin:0">실험 관리</h2><p class="small muted" style="margin:4px 0 0">공통 루브릭 6개 항목은 모든 실험에 자동으로 들어가요. 실험마다 이론값과 실험 특화 문항을 추가할 수 있어요.</p></div><button class="btn pri" data-act="newexp">+ 실험 추가</button></div></div>
+    <div class="card"><h3>공통 루브릭 (모든 실험 공통)</h3><div class="small">${CORE.map(c=>`<b>${esc(c.name)}</b> · ${esc(c.q)}`).join('<br>')}</div></div>
+    <div class="grid g2">${list}</div>`;
+}
+function expFormHTML(){
+  const e=S.edit;
+  return `<div class="card"><h2>${e._new?'실험 추가':'실험 수정'}</h2>
+    <div class="row"><div class="field"><label>실험 이름</label><input type="text" data-e="name" value="${esc(e.name)}" placeholder="예: 단진자 주기 측정"></div></div>
+    <div class="row" style="margin-top:10px"><div class="field"><label>설명</label><input type="text" data-e="desc" value="${esc(e.desc)}" placeholder="학생에게 보여 줄 한 줄 설명"></div></div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>측정량 이름</label><input type="text" data-e="quantity" value="${esc(e.quantity)}" placeholder="예: 중력가속도 g"></div>
+      <div class="field"><label>단위</label><input type="text" data-e="unit" value="${esc(e.unit)}" placeholder="예: m/s²"></div>
+      <div class="field"><label>이론값</label><input type="number" step="any" data-e="theory" value="${esc(e.theory??'')}"></div>
+      <div class="field"><label>허용 오차 (%)</label><input type="number" step="any" min="0.1" data-e="tol" value="${esc(e.tol??5)}"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><div class="field" style="max-width:340px"><label>측정값 입력 방식</label><select data-e="inputMode">
+      <option value="value" ${e.inputMode!=='ht'?'selected':''}>측정값 직접 입력</option><option value="ht" ${e.inputMode==='ht'?'selected':''}>자유낙하: 높이 h·시간 t 입력 → g 자동 계산</option></select></div></div>
+    <div class="hint">허용 오차는 측정 정확도 점수의 기준이에요. 기준의 40% 이내면 4단계, 기준 이내면 3단계, 2배 이내면 2단계, 그 이상이면 1단계로 계산해요.</div>
+    <h3 style="margin-top:18px">실험 특화 문항 (선택)</h3><p class="small muted" style="margin-top:-4px">공통 6개 항목 외에 이 실험에서만 묻고 싶은 문항이에요. 학생은 4단계(전혀 할 수 없다 ~ 자신 있게 설명·수행할 수 있다)로 답해요.</p>
+    <div id="xlist">${e.extras.map((x,i)=>`<div class="xrow"><input type="text" data-x="${i}" value="${esc(x.q)}" placeholder="예: 진자의 길이와 주기의 관계를 설명할 수 있다."><button class="btn sm danger" data-act="delx" data-i="${i}">삭제</button></div>`).join('')}</div>
+    <button class="btn sm" data-act="addx">+ 문항 추가</button>
+    <div class="navbar" style="margin-top:20px"><button class="btn" data-act="cancelexp">취소</button><button class="btn pri" data-act="saveexp">저장</button></div></div>`;
+}
+function weightsHTML(){
+  const w=S.cfg.weights;
+  const items = CORE.map(c=>({id:c.id,name:c.name})).concat([{id:'_extra',name:'실험 특화 문항 (평균)'}]);
+  return `<div class="card"><h2>가중치 설정</h2><p class="small muted" style="margin-top:-6px">항목별 가중치로 자기평가 총점(100점 환산)을 계산해요. 0으로 두면 총점에서 빠져요.</p>
+    <div class="wlist">${items.map(it=>`<div class="field"><label>${esc(it.name)}</label><input type="number" min="0" max="5" step="0.5" data-w="${it.id}" value="${esc(w[it.id]??1)}"></div>`).join('')}</div>
+    <h3 style="margin-top:20px">종합 지수 비율</h3>
+    <div class="row" style="align-items:center"><div class="field" style="max-width:220px"><label>자기평가 비중 (%)</label><input type="number" min="0" max="100" step="5" data-w="rubricRatio" value="${esc(S.cfg.rubricRatio)}"></div><div class="small muted" style="padding-bottom:8px">나머지는 측정 정확도(오차율 기반)가 차지해요.</div></div>
+    <div class="navbar" style="margin-top:16px"><button class="btn" data-act="resetw">기본값으로</button><button class="btn pri" data-act="savew">저장</button></div></div>`;
+}
+
+/* ===================== 샘플 데이터 ===================== */
+function gauss(){ let u=0,v=0; while(!u)u=Math.random(); while(!v)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+const clampLv = x => Math.max(1, Math.min(4, Math.round(x)));
+function makeSample(exp, i){
+  const ability = 1.6 + Math.random()*2.2;          // 실제 실력
+  const bias = (Math.random()-0.45)*1.6;             // 자기평가 치우침
+  const pre={scores:{},extras:{}}, post={scores:{},extras:{}};
+  CORE.forEach(c=>{ pre.scores[c.id]=clampLv(ability-0.6+bias+gauss()*0.5); post.scores[c.id]=clampLv(pre.scores[c.id]+Math.random()*1.3); });
+  exp.extras.forEach(x=>{ pre.extras[x.id]=clampLv(ability-0.7+bias+gauss()*0.5); post.extras[x.id]=clampLv(pre.extras[x.id]+Math.random()*1.2); });
+  const th = exp.theory || 1; const errFrac = (exp.tol/100) * (4.6-ability) * 0.55;
+  const sysErr = (Math.random()<0.5?-1:1) * errFrac; const n = 4 + Math.floor(Math.random()*4);
+  const vals = Array.from({length:n}, ()=> th*(1+sysErr+gauss()*errFrac*0.5));
+  const measure = {values:[''],h:[''],t:['']};
+  if(exp.inputMode==='ht'){ measure.h=[]; measure.t=[]; vals.forEach(g=>{ const h=+(1.0+Math.random()*0.5).toFixed(2); measure.h.push(String(h)); measure.t.push(String(+(Math.sqrt(2*h/Math.max(g,0.1))).toFixed(3))); }); }
+  else measure.values = vals.map(v=>String(+v.toPrecision(5)));
+  pre.predErr = String(+(Math.max(0.5, exp.tol*(0.4+Math.random()*1.4))).toFixed(1));
+  post.reflection = '';
+  const done = Math.random() > 0.12;
+  return {name:'샘플학생 '+String(i+1).padStart(2,'0'), sid:'2026'+String(1001+i), sample:true, updatedAt:new Date().toISOString(),
+    exps:{[exp.id]:{step:done?4:3, done, pre, measure, post}}};
+}
+
 /* ===================== 이벤트 ===================== */
 document.addEventListener('click', async ev=>{
   const b = ev.target.closest('[data-act]'); if(!b || b.tagName==='SELECT') return;
@@ -431,6 +627,7 @@ document.addEventListener('click', async ev=>{
   try { await handle(act, b); } catch(e){ console.error(e); toast(errMsg(e)); }
 });
 async function handle(act, b){
+  if(act==='view'){ S.view=b.dataset.v; if(S.view==='prof'){ try{ await API.loadResponses(); }catch(e){} } render(); return; }
   if(act==='home'){ S.expId=null; render(); window.scrollTo(0,0); return; }
   if(act==='open'){
     const my=ensureMy();
@@ -473,6 +670,58 @@ async function handle(act, b){
     const ok = await askConfirm('사전·사후 자기평가와 측정값을 처음부터 다시 입력할까요? 지금 결과는 지워져요.', '다시 하기');
     if(!ok) return; delete S.my.exps[S.expId]; rec(S.expId); await saveMy(); render(); window.scrollTo(0,0); return;
   }
+  /* 교수자 */
+  if(!S.isAdmin) return;
+  if(act==='ptab'){ S.ptab=b.dataset.v; S.edit=null; render(); return; }
+  if(act==='refresh'){ await API.loadResponses(); render(); toast('최신 응답을 불러왔어요.'); return; }
+  if(act==='csv'){
+    const exp=S.exps.find(e=>e.id===S.pexp); const rows=respRows(exp); const D=dims(exp);
+    const head=['학번','이름','완료',...D.map(d=>'사전_'+d.name),...D.map(d=>'사후_'+d.name),'사전총점','사후총점','측정횟수','평균','표준편차','오차율(%)','예상오차율(%)','메타인지','종합지수','성찰메모'];
+    const q=v=>{ const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
+    const lines=[head.map(q).join(',')].concat(rows.map(({p,r,A})=>[p.sid,p.name,r.done?'Y':'N',...D.map(d=>A.pre[d.id]!=null?fmt(A.pre[d.id],2):''),...D.map(d=>A.post[d.id]!=null?fmt(A.post[d.id],2):''),
+      fmt(A.preTotal,1),fmt(A.postTotal,1),A.st.n||0,fmt(A.st.mean,4),fmt(A.st.sd,4),fmt(A.st.relErr,2),A.pred??'',A.calib?CALIB[A.calib][0]:'',fmt(A.composite,1),(r.post&&r.post.reflection)||''].map(q).join(',')));
+    const text=lines.join('\n');
+    try{ await navigator.clipboard.writeText(text); toast('CSV를 복사했어요. 엑셀이나 구글 시트에 붙여 넣으세요.'); }
+    catch(e){ $('#modalbox').innerHTML=`<h3>CSV</h3><p class="small muted">자동 복사가 막혀 있어요. 아래 내용을 직접 복사하세요.</p><textarea style="min-height:200px">${esc(text)}</textarea><div class="navbar"><span></span><button class="btn pri" onclick="document.getElementById('modal').classList.remove('show')">닫기</button></div>`; $('#modal').classList.add('show'); }
+    return;
+  }
+  if(act==='sample' && S.isOwner){
+    const exp=S.exps.find(e=>e.id===S.pexp); if(!exp) return;
+    b.disabled=true; b.textContent='생성 중…';
+    for(let i=0;i<15;i++){ const id='sample-'+String(i+1).padStart(2,'0'); const old=S.resps.find(p=>p.id===id); const doc=makeSample(exp,i);
+      if(old && old.exps){ const keep=clone(old); delete keep.id; keep.exps[exp.id]=doc.exps[exp.id]; await API.saveResp(id, keep); } else await API.saveResp(id, doc); }
+    await API.loadResponses(); render(); toast('샘플 응답 15개를 만들었어요.'); return;
+  }
+  if(act==='unsample' && S.isOwner){
+    if(!(await askConfirm('샘플 응답을 모두 삭제할까요? 실제 학생 응답은 그대로 남아요.'))) return;
+    for(const p of S.resps.filter(p=>p.sample)) await API.delResp(p.id);
+    await API.loadResponses(); render(); toast('샘플 응답을 삭제했어요.'); return;
+  }
+  if(act==='newexp'){ S.edit={_new:true, id:rid('exp'), name:'', desc:'', quantity:'', unit:'', theory:'', tol:5, inputMode:'value', extras:[], order:Date.now()}; render(); return; }
+  if(act==='editexp'){ S.edit=clone(S.exps.find(e=>e.id===b.dataset.id)); render(); return; }
+  if(act==='cancelexp'){ S.edit=null; render(); return; }
+  if(act==='addx'){ S.edit.extras.push({id:rid('x'), q:''}); render(); const ins=document.querySelectorAll('[data-x]'); ins[ins.length-1]?.focus(); return; }
+  if(act==='delx'){ S.edit.extras.splice(+b.dataset.i,1); render(); return; }
+  if(act==='saveexp'){
+    const e=clone(S.edit); const isNew=e._new; delete e._new;
+    e.name=(e.name||'').trim(); if(!e.name){ toast('실험 이름을 입력해 주세요.'); return; }
+    e.theory=num(e.theory); if(e.theory==null){ toast('이론값을 입력해 주세요. 오차율 계산에 필요해요.'); return; }
+    e.tol=num(e.tol)||5; e.extras=e.extras.map(x=>({id:x.id, q:(x.q||'').trim()})).filter(x=>x.q);
+    b.disabled=true;
+    try{ await API.saveExp(e); } catch(err){ b.disabled=false; toast(errMsg(err)); return; }
+    normExp(e); const i=S.exps.findIndex(x=>x.id===e.id); if(i>=0) S.exps[i]=e; else S.exps.push(e);
+    S.edit=null; render(); toast(isNew?'실험을 추가했어요.':'저장했어요.'); return;
+  }
+  if(act==='delexp'){
+    const e=S.exps.find(x=>x.id===b.dataset.id);
+    if(!(await askConfirm(`"${e.name}" 실험을 삭제할까요? 학생 응답 기록은 남지만 목록과 분석에서 보이지 않게 돼요.`))) return;
+    await API.delExp(e.id); S.exps=S.exps.filter(x=>x.id!==e.id); render(); toast('삭제했어요.'); return;
+  }
+  if(act==='resetw'){ S.cfg=mergeCfg(null); render(); return; }
+  if(act==='savew'){
+    document.querySelectorAll('[data-w]').forEach(inp=>{ const v=num(inp.value); if(inp.dataset.w==='rubricRatio') S.cfg.rubricRatio=Math.max(0,Math.min(100,v??70)); else S.cfg.weights[inp.dataset.w]=Math.max(0,Math.min(5,v??1)); });
+    await API.saveConfig(S.cfg); render(); toast('가중치를 저장했어요.'); return;
+  }
 }
 document.addEventListener('input', ev=>{
   const t=ev.target;
@@ -482,16 +731,21 @@ document.addEventListener('input', ev=>{
     const sb=$('#statsBox'); if(sb) sb.innerHTML=statsHTML(exp, r); return;
   }
   if(t.dataset.f){ const exp=curExp(); if(!exp) return; const r=rec(exp.id); if(t.dataset.f==='predErr') r.pre.predErr=t.value; else r.post.reflection=t.value; return; }
+  if(t.dataset.e && S.edit){ S.edit[t.dataset.e]=t.value; return; }
+  if(t.dataset.x!=null && S.edit){ S.edit.extras[+t.dataset.x].q=t.value; return; }
 });
 document.addEventListener('change', ev=>{
   const t=ev.target;
+  if(t.dataset.act==='pexp'){ S.pexp=t.value; render(); return; }
+  if(t.dataset.e && S.edit){ S.edit[t.dataset.e]=t.value; }
   if((t.id==='pName'||t.id==='pSid')){ const my=ensureMy(); my.name=$('#pName').value.trim(); my.sid=$('#pSid').value.trim(); }
 });
 
 /* ===================== 시작 ===================== */
 (async function start(){
   await API.init();
-  await API.loadAll();
+  try { await API.loadAll(); }
+  catch(e){ $('#app').innerHTML=`<div class="card empty">데이터를 불러오지 못했어요. 잠시 후 페이지를 다시 열어 주세요.</div>`; renderBanner(); return; }
   render();
 })();
 </script>
